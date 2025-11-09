@@ -65,7 +65,10 @@ def main():
     print(f"Returned {len(items)} Items")
     
     # create xarray dataset without loading data
-    sentinel2_stack = stackstac.stack(items, epsg=4326)
+    sentinel2_stack = stackstac.stack(valid_items,
+    assets=["B02", "B03", "B04", "B08"],
+    epsg=4326
+    )
 
     
     # filter to specified month range
