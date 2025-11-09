@@ -63,10 +63,16 @@ def main():
     # Check how many items were returned
     items = search.item_collection()
     print(f"Returned {len(items)} Items")
+
+    
+    # Filter out any invalid items that might be missing geometry or bbox
+    valid_items = [it for it in items if it.bbox is not None]
+    print(f"Using {len(valid_items)} valid items out of {len(items)}")
+
     
     # create xarray dataset without loading data
     sentinel2_stack = stackstac.stack(valid_items,
-    assets=["B02", "B03", "B04", "B08"],
+    assets=["blue", "green", "red", "nir"],
     epsg=4326
     )
 
