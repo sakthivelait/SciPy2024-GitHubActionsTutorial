@@ -34,7 +34,7 @@ def download_s2(img1_product_name, img2_product_name, bbox):
     query=[f's2:product_uri={img1_product_name}'])
     
     img1_items = search.item_collection()
-    img1_full = stackstac.stack(img1_items)
+    img1_full = stackstac.stack(img1_items, epsg=4326)
 
     search = catalog.search(
     collections=["sentinel-2-l2a"],
@@ -42,7 +42,7 @@ def download_s2(img1_product_name, img2_product_name, bbox):
 
     # Check how many items were returned
     img2_items = search.item_collection()
-    img2_full = stackstac.stack(img2_items)
+    img2_full = stackstac.stack(img2_items, epsg=4326)
 
     aoi = gpd.GeoDataFrame({'geometry':[shape(bbox)]})
     # crop images to aoi
