@@ -54,10 +54,13 @@ jobs:
                 environment-file: glacier_image_correlation/environment.yml
 
             - name: Modify autoRIFT Package
-            # current release has deprecated numpy functions https://github.com/nasa-jpl/autoRIFT/issues/97
+              # Fix for numpy deprecations in autoRIFT
               run: |
                 git clone https://github.com/gbrencher/autoRIFT.git
-                cp -f autoRIFT/geo_autoRIFT/autoRIFT/autoRIFT.py /home/runner/micromamba/envs/image-correlation/lib/python3.12/site-packages/autoRIFT/
+                TARGET_DIR=$(python -c "import site; print(site.getsitepackages()[0])")/autoRIFT
+                mkdir -p $TARGET_DIR
+                cp -f autoRIFT/geo_autoRIFT/autoRIFT/autoRIFT.py $TARGET_DIR/
+
                 
             - name: Download Data and Run autoRIFT Software
               run: |
