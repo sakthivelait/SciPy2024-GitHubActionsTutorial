@@ -53,13 +53,10 @@ jobs:
                 cache-environment: true
                 environment-file: glacier_image_correlation/environment.yml
 
-            - name: Modify autoRIFT Package
-              # Fix for numpy deprecations in autoRIFT
+            - name: Install AutoRIFT from Conda-Forge
               run: |
-                git clone https://github.com/gbrencher/autoRIFT.git
-                TARGET_DIR=$(python -c "import site; print(site.getsitepackages()[0])")/autoRIFT
-                mkdir -p $TARGET_DIR
-                cp -f autoRIFT/geo_autoRIFT/autoRIFT/autoRIFT.py $TARGET_DIR/
+                micromamba install -y -n image-correlation -c conda-forge autoRIFT
+
 
                 
             - name: Download Data and Run autoRIFT Software
