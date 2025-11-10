@@ -84,7 +84,9 @@ def download_s2(img1_product_name, img2_product_name, bbox):
     print("DEBUG: First img1 item bbox:", getattr(img1_items[0], "bbox", None))
     print("DEBUG: First img2 item bbox:", getattr(img2_items[0], "bbox", None))
 
-    
+    print("DEBUG: img1 asset keys:", list(img1_items[0].assets.keys()))
+    print("DEBUG: img2 asset keys:", list(img2_items[0].assets.keys()))
+
     
     
     # Stack items with explicit assets and epsg
