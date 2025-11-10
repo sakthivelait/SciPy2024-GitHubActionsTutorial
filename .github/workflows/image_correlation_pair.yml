@@ -66,8 +66,9 @@ jobs:
 
 
                 
-            - name: Download Data and Run autoRIFT Software
+            - name: Activate environment and run autoRIFT
               run: |
+                micromamba activate image-correlation
                 python glacier_image_correlation/image_correlation.py ${{ inputs.img1_product_name }} ${{ inputs.img2_product_name }}
 
             - name: Upload Velocity Map as Artifact
