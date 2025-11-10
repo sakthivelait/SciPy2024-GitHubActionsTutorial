@@ -73,8 +73,15 @@ def download_s2(img1_product_name, img2_product_name, bbox):
         assets_to_use = ["B02","B03","B04","B08"]
 
     # Stack items with explicit assets and epsg
-    img1_full = stackstac.stack(img1_items, assets=assets_to_use, epsg=4326)
-    img2_full = stackstac.stack(img2_items, assets=assets_to_use, epsg=4326)
+    # Load only the NIR band (B08) with chunking to avoid memory overflow
+    img1_full = stackstac.stack(
+        img1_items, epsg=4326, assets=["B08"], chunks={"x": 1024, "y": 1024}
+    )
+    
+    img2_full = stackstac.stack(
+        img2_items, epsg=4326, assets=["B08"], chunks={"x": 1024, "y": 1024}
+    )
+
 
     # Compute intersection bbox from items' bboxes (in lon/lat): (minx,miny,maxx,maxy)
     def items_bounds(candidate_items):
