@@ -12,4 +12,5 @@ dependencies:
   - autorift
   - pystac-client
   - stackstac
+  - numba 
   - dask
