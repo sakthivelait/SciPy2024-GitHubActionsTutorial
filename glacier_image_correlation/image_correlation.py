@@ -72,6 +72,21 @@ def download_s2(img1_product_name, img2_product_name, bbox):
     if len(assets_to_use) == 0:
         assets_to_use = ["B02","B03","B04","B08"]
 
+
+    
+    print(f"DEBUG: img1_items count = {len(img1_items)}")
+    print(f"DEBUG: img2_items count = {len(img2_items)}")
+    
+    if len(img1_items) == 0 or len(img2_items) == 0:
+        raise ValueError("No Sentinel-2 items were found for the given product names or bounding box.")
+    
+    # Optional: print bbox info for first item
+    print("DEBUG: First img1 item bbox:", getattr(img1_items[0], "bbox", None))
+    print("DEBUG: First img2 item bbox:", getattr(img2_items[0], "bbox", None))
+
+    
+    
+    
     # Stack items with explicit assets and epsg
     # Load only the NIR band (B08) with chunking to avoid memory overflow
     # Stack Sentinel-2 NIR band (B08) and apply chunking afterwards for memory efficiency
