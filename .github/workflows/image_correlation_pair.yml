@@ -53,6 +53,11 @@ jobs:
                 cache-environment: true
                 environment-file: glacier_image_correlation/environment.yml
 
+                
+            - name: Pin NumPy to compatible version
+              run: |
+                micromamba install -y -n image-correlation -c conda-forge numpy=1.26
+
             - name: Install AutoRIFT from Conda-Forge
               run: |
                 micromamba install -y -n image-correlation -c conda-forge autoRIFT
