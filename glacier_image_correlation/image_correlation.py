@@ -92,8 +92,21 @@ def download_s2(img1_product_name, img2_product_name, bbox):
     # Stack items with explicit assets and epsg
     # Load only the NIR band (B08) with chunking to avoid memory overflow
     # Stack Sentinel-2 NIR band (B08) and apply chunking afterwards for memory efficiency
-    img1_full = stackstac.stack(img1_items, epsg=4326, assets=["B08"]).chunk({"x": 1024, "y": 1024})
-    img2_full = stackstac.stack(img2_items, epsg=4326, assets=["B08"]).chunk({"x": 1024, "y": 1024})
+
+    # --- Choose available NIR band dynamically ---
+    nir_candidates = ["nir08", "nir", "nir09", "B08", "B8A"]
+    available_bands = list(img1_items[0].assets.keys())
+    nir_band = next((b for b in nir_candidates if b in available_bands), None)
+    
+    if not nir_band:
+        raise ValueError(f"No NIR band found in available assets: {available_bands}")
+    
+    print(f"DEBUG: Using NIR band {nir_band}")
+    
+    # --- Stack Sentinel-2 NIR band and chunk ---
+    img1_full = stackstac.stack(img1_items, epsg=4326, assets=[nir_band]).chunk({"x": 1024, "y": 1024})
+    img2_full = stackstac.stack(img2_items, epsg=4326, assets=[nir_band]).chunk({"x": 1024, "y": 1024})
+
 
 
 
