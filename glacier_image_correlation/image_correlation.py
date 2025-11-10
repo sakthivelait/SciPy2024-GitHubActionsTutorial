@@ -340,8 +340,10 @@ def main():
     # download Sentinel-2 images
     img1_ds, img2_ds = download_s2(args.img1_product_name, args.img2_product_name, bbox)
     # grab near infrared band only
-    img1 = img1_ds.nir.squeeze().values
-    img2 = img2_ds.nir.squeeze().values
+    # Extract using the chosen NIR band name
+    img1 = img1_ds[nir_band].squeeze().values
+    img2 = img2_ds[nir_band].squeeze().values
+
     
     # scale search limit with temporal baseline assuming max velocity 1000 m/yr (100 px/yr)
     search_limit_x = search_limit_y = round(((((img2_ds.time.isel(time=0) - img1_ds.time.isel(time=0)).dt.days)*100)/365.25).item())
