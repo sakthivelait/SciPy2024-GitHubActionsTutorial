@@ -102,8 +102,14 @@ def download_s2(img1_product_name, img2_product_name, bbox):
             bounds = inter
 
     # Clip both stacks to the intersection bounds (ensuring same grid)
-    img1_clipped = img1_full.rio.reproject("EPSG:4326").rio.clip_box(*bounds, crs="EPSG:4326")
-    img2_clipped = img2_full.rio.reproject("EPSG:4326").rio.clip_box(*bounds, crs="EPSG:4326")
+    # Collapse time dimension before reprojection
+
+    img1_single = img1_full.isel(time=0)
+    img2_single = img2_full.isel(time=0)
+    
+    img1_clipped = img1_single.rio.reproject("EPSG:4326").rio.clip_box(*bounds, crs="EPSG:4326")
+    img2_clipped = img2_single.rio.reproject("EPSG:4326").rio.clip_box(*bounds, crs="EPSG:4326")
+
 
     # If shapes or coords differ slightly, resample img2 to img1's grid (use xarray interp)
     # choose reference grid
