@@ -164,7 +164,7 @@ def download_s2(img1_product_name, img2_product_name, bbox):
     img1_ds = img1_clipped.to_dataset(dim="band")
     img2_ds = img2_on_ref.to_dataset(dim="band")
 
-    return img1_ds, img2_ds
+    return img1_ds, img2_ds, nir_band
  
 
 def run_autoRIFT(img1, img2, skip_x=3, skip_y=3, min_x_chip=16, max_x_chip=64,
@@ -338,7 +338,7 @@ def main():
     }
 
     # download Sentinel-2 images
-    img1_ds, img2_ds = download_s2(args.img1_product_name, args.img2_product_name, bbox)
+    img1_ds, img2_ds, nir_band = download_s2(args.img1_product_name, args.img2_product_name, bbox)
     # grab near infrared band only
     # Extract using the chosen NIR band name
     img1 = img1_ds[nir_band].squeeze().values
