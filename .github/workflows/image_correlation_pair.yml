@@ -39,6 +39,7 @@ jobs:
     autoRIFT:
         name: ${{ inputs.workflow_name }}
         runs-on: ubuntu-latest
+        timeout-minutes: 180
         defaults:
             run:
                 shell: bash -el {0}
