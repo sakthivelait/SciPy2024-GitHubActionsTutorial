@@ -23,48 +23,138 @@ warnings.filterwarnings("ignore", category=UserWarning)
 
 def download_s2(img1_product_name, img2_product_name, bbox):
     '''
-    Download a pair of Sentinel-2 images acquired on given dates over a given bounding box
+    Download a pair of Sentinel-2 images acquired on given dates over a given bounding box.
+    Ensures stacks use single-band assets, are in epsg=4326, and are clipped/resampled to a common grid.
     '''
-    # We use the api from element84 to query the data
     URL = "https://earth-search.aws.element84.com/v1"
     catalog = pystac_client.Client.open(URL)
 
-    search = catalog.search(
-    collections=["sentinel-2-l2a"],
-    query=[f's2:product_uri={img1_product_name}'])
-    
-    img1_items = search.item_collection()
-    img1_full = stackstac.stack(img1_items, epsg=4326)
+    # helper to get items for a product
+    def get_items_for_product(product_name):
+        search = catalog.search(
+            collections=["sentinel-2-l2a"],
+            query=[f's2:product_uri={product_name}']
+        )
+        return list(search.item_collection())
 
-    search = catalog.search(
-    collections=["sentinel-2-l2a"],
-    query=[f's2:product_uri={img2_product_name}'])
+    img1_items = get_items_for_product(img1_product_name)
+    img2_items = get_items_for_product(img2_product_name)
 
-    # Check how many items were returned
-    img2_items = search.item_collection()
-    img2_full = stackstac.stack(img2_items, epsg=4326)
+    if len(img1_items) == 0 or len(img2_items) == 0:
+        raise ValueError("Could not find one of the product names in STAC catalog.")
 
-    aoi = gpd.GeoDataFrame({'geometry':[shape(bbox)]})
-    # crop images to aoi
-    img1_clipped = img1_full.rio.clip_box(*aoi.total_bounds,crs=4326) 
-    img2_clipped = img2_full.rio.clip_box(*aoi.total_bounds,crs=4326)
-    
-    img1_ds = img1_clipped.to_dataset(dim='band')
-    img2_ds = img2_clipped.to_dataset(dim='band')
+    # Inspect available assets in first item and choose single-band asset ids
+    # Common Sentinel-2 naming in this catalog uses 'red', 'green', 'blue', 'nir' (or B02/B03/B04/B08)
+    def choose_assets(item):
+        keys = set(item.assets.keys())
+        # prefer explicit names if available
+        for candidate in (["nir","red","green","blue"], ["B08","B04","B03","B02"], ["nir-jp2","red-jp2","green-jp2","blue-jp2"]):
+            if all(k in keys for k in candidate):
+                # order we want: blue, green, red, nir (but later we just use nir)
+                return candidate
+        # fallback: try to pick any single-band jp2 assets with 'nir' or 'B08'
+        preferred = [k for k in keys if 'nir' in k or 'B08' in k]
+        if preferred:
+            # try to build a minimal list
+            assets = []
+            for want in ["blue","green","red","nir","B02","B03","B04","B08"]:
+                if want in keys:
+                    assets.append(want)
+            if assets:
+                return assets[:4]
+        # as last resort, return all single-asset keys (may include 'visual' so we'll filter later)
+        return list(keys)
 
-    return img1_ds, img2_ds 
+    assets_to_use = choose_assets(img1_items[0])
+    # ensure we don't accidentally include 'visual' multi-band asset
+    assets_to_use = [a for a in assets_to_use if 'visual' not in a and a.endswith(('-jp2','')) or not a == 'visual']
+    # If still empty, explicit fallback
+    if len(assets_to_use) == 0:
+        assets_to_use = ["B02","B03","B04","B08"]
+
+    # Stack items with explicit assets and epsg
+    img1_full = stackstac.stack(img1_items, assets=assets_to_use, epsg=4326)
+    img2_full = stackstac.stack(img2_items, assets=assets_to_use, epsg=4326)
+
+    # Compute intersection bbox from items' bboxes (in lon/lat): (minx,miny,maxx,maxy)
+    def items_bounds(candidate_items):
+        bboxes = [it.bbox for it in candidate_items if it.bbox is not None]
+        if not bboxes:
+            return None
+        minx = max(b[0] for b in bboxes)
+        miny = max(b[1] for b in bboxes)
+        maxx = min(b[2] for b in bboxes)
+        maxy = min(b[3] for b in bboxes)
+        return (minx, miny, maxx, maxy)
+
+    b1 = items_bounds(img1_items)
+    b2 = items_bounds(img2_items)
+    if b1 is None or b2 is None:
+        # fallback to provided bbox if item bboxes missing
+        bounds = tuple(gpd.GeoDataFrame({'geometry':[shape(bbox)]}).total_bounds)  # (minx,miny,maxx,maxy)
+    else:
+        # intersection of the two sets of items
+        inter = (max(b1[0], b2[0]), max(b1[1], b2[1]), min(b1[2], b2[2]), min(b1[3], b2[3]))
+        # if intersection is invalid, fallback to provided bbox
+        if inter[0] >= inter[2] or inter[1] >= inter[3]:
+            bounds = tuple(gpd.GeoDataFrame({'geometry':[shape(bbox)]}).total_bounds)
+        else:
+            bounds = inter
+
+    # Clip both stacks to the intersection bounds (ensuring same grid)
+    img1_clipped = img1_full.rio.reproject("EPSG:4326").rio.clip_box(*bounds, crs="EPSG:4326")
+    img2_clipped = img2_full.rio.reproject("EPSG:4326").rio.clip_box(*bounds, crs="EPSG:4326")
+
+    # If shapes or coords differ slightly, resample img2 to img1's grid (use xarray interp)
+    # choose reference grid
+    ref = img1_clipped
+    try:
+        img2_on_ref = img2_clipped.interp(x=ref.x, y=ref.y, method="nearest")
+    except Exception:
+        # fallback: align by selecting overlapping coordinate ranges
+        xmin = max(img1_clipped.x.min().item(), img2_clipped.x.min().item())
+        xmax = min(img1_clipped.x.max().item(), img2_clipped.x.max().item())
+        ymin = max(img1_clipped.y.min().item(), img2_clipped.y.min().item())
+        ymax = min(img1_clipped.y.max().item(), img2_clipped.y.max().item())
+        img1_clipped = img1_clipped.sel(x=slice(xmin, xmax), y=slice(ymax, ymin))
+        img2_clipped = img2_clipped.sel(x=slice(xmin, xmax), y=slice(ymax, ymin))
+        img2_on_ref = img2_clipped
+
+    # convert to dataset where band is a coordinate for consistency
+    img1_ds = img1_clipped.to_dataset(dim="band")
+    img2_ds = img2_on_ref.to_dataset(dim="band")
+
+    return img1_ds, img2_ds
+ 
 
 def run_autoRIFT(img1, img2, skip_x=3, skip_y=3, min_x_chip=16, max_x_chip=64,
                  preproc_filter_width=3, mpflag=4, search_limit_x=30, search_limit_y=30):
     '''
     Configure and run autoRIFT feature tracking with Sentinel-2 data for large mountain glaciers
+    Ensures arrays are same dtype/shape and builds grid safely.
     '''
-        
+    # convert to numpy arrays (float32) and ensure 2D
+    I1 = np.array(img1, dtype=np.float32)
+    I2 = np.array(img2, dtype=np.float32)
+
+    # If input has extra dims (e.g., time or band), reduce to 2D using squeeze
+    if I1.ndim > 2:
+        I1 = np.squeeze(I1)
+    if I2.ndim > 2:
+        I2 = np.squeeze(I2)
+
+    # Ensure shapes match: crop to minimal common shape
+    rows = min(I1.shape[0], I2.shape[0])
+    cols = min(I1.shape[1], I2.shape[1])
+    I1 = I1[:rows, :cols]
+    I2 = I2[:rows, :cols]
+
+    # Prepare autoRIFT object
     obj = autoRIFT()
     obj.MultiThread = mpflag
 
-    obj.I1 = img1
-    obj.I2 = img2
+    obj.I1 = I1
+    obj.I2 = I2
 
     obj.SkipSampleX = skip_x
     obj.SkipSampleY = skip_y
@@ -76,43 +166,62 @@ def run_autoRIFT(img1, img2, skip_x=3, skip_y=3, min_x_chip=16, max_x_chip=64,
     # oversample ratio, balancing precision and performance for different chip sizes
     obj.OverSampleRatio = {obj.ChipSize0X:16, obj.ChipSize0X*2:32, obj.ChipSize0X*4:64}
 
-    # generate grid
-    m,n = obj.I1.shape
-    xGrid = np.arange(obj.SkipSampleX+10,n-obj.SkipSampleX,obj.SkipSampleX)
-    yGrid = np.arange(obj.SkipSampleY+10,m-obj.SkipSampleY,obj.SkipSampleY)
-    nd = xGrid.__len__()
-    md = yGrid.__len__()
-    obj.xGrid = np.int32(np.dot(np.ones((md,1)),np.reshape(xGrid,(1,xGrid.__len__()))))
-    obj.yGrid = np.int32(np.dot(np.reshape(yGrid,(yGrid.__len__(),1)),np.ones((1,nd))))
-    noDataMask = np.invert(np.logical_and(obj.I1[:, xGrid-1][yGrid-1, ] > 0, obj.I2[:, xGrid-1][yGrid-1, ] > 0))
+    # generate grid safely (xGrid are column indices, yGrid are row indices)
+    m, n = obj.I1.shape
+    # protect against too-small images
+    if n <= (obj.SkipSampleX + 10) or m <= (obj.SkipSampleY + 10):
+        raise ValueError("Image too small for chosen SkipSample and chip sizes")
+
+    xGrid = np.arange(obj.SkipSampleX + 10, n - obj.SkipSampleX, obj.SkipSampleX)
+    yGrid = np.arange(obj.SkipSampleY + 10, m - obj.SkipSampleY, obj.SkipSampleY)
+    nd = xGrid.size
+    md = yGrid.size
+
+    obj.xGrid = np.int32(np.tile(xGrid[np.newaxis, :], (md, 1)))
+    obj.yGrid = np.int32(np.tile(yGrid[:, np.newaxis], (1, nd)))
+
+    # Build noDataMask at the grid points: True where either image has non-positive values (i.e., nodata)
+    # Indexing: rows=y, cols=x
+    # sample values at grid points
+    I1_samples = obj.I1[obj.yGrid, obj.xGrid]
+    I2_samples = obj.I2[obj.yGrid, obj.xGrid]
+    valid_mask = (I1_samples > 0) & (I2_samples > 0)
+    noDataMask = np.logical_not(valid_mask)
+
+    # Initialize Dx0/Dy0 if not present (same shape as grid)
+    if not hasattr(obj, "Dx0") or obj.Dx0 is None:
+        obj.Dx0 = np.zeros_like(obj.xGrid, dtype=np.float32)
+    if not hasattr(obj, "Dy0") or obj.Dy0 is None:
+        obj.Dy0 = np.zeros_like(obj.xGrid, dtype=np.float32)
 
     # set search limits
     obj.SearchLimitX = np.full_like(obj.xGrid, search_limit_x)
     obj.SearchLimitY = np.full_like(obj.xGrid, search_limit_y)
 
     # set search limit and offsets in nodata areas
-    obj.SearchLimitX = obj.SearchLimitX * np.logical_not(noDataMask)
-    obj.SearchLimitY = obj.SearchLimitY * np.logical_not(noDataMask)
-    obj.Dx0 = obj.Dx0 * np.logical_not(noDataMask)
-    obj.Dy0 = obj.Dy0 * np.logical_not(noDataMask)
+    obj.SearchLimitX = obj.SearchLimitX * (~noDataMask)
+    obj.SearchLimitY = obj.SearchLimitY * (~noDataMask)
+    obj.Dx0 = obj.Dx0 * (~noDataMask)
+    obj.Dy0 = obj.Dy0 * (~noDataMask)
     obj.Dx0[noDataMask] = 0
     obj.Dy0[noDataMask] = 0
     obj.NoDataMask = noDataMask
 
     print("preprocessing images")
     obj.WallisFilterWidth = preproc_filter_width
-    obj.preprocess_filt_lap() # preprocessing with laplacian filter
+    obj.preprocess_filt_lap()  # preprocessing with laplacian filter
     obj.uniform_data_type()
 
     print("starting autoRIFT")
     obj.runAutorift()
     print("autoRIFT complete")
 
-    # convert displacement to m
+    # convert displacement to m (if pixel size = 10 m, so Dx in pixels * 10)
     obj.Dx_m = obj.Dx * 10
     obj.Dy_m = obj.Dy * 10
-        
+
     return obj
+
 
 def prep_outputs(obj, img1_ds, img2_ds):
     '''
